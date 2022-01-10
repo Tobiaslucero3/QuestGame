@@ -4,25 +4,32 @@ pragma solidity >=0.4.22 <0.9.0;
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 contract CharacterContract is Ownable{
+
+  uint skillIncreaseCooldownTime = 6 hours;
   
   struct Character {
     string name;
     uint32 level; // This is overall character level, increases as other stats increase
-    uint32 pointsToLevelUp; // This is how many points you have to increase your other stats to level up
-    uint32 totalHealth;
-    uint32 strength;
-    uint32 speed;
-    uint32 intelligence;
+    uint16 pointsToLevelUp; // This is how many points you have to increase your other stats to level up
+    
+    Skill health;
+    Skill strength;
+    Skill speed;
+    Skill intelligence;
+
+    uint32 readyTimeForSkillIncrease;
   }
 
   struct Skill {
-    uint16 level;
-    uint8 pointsToNextLevel;
+    uint16 skillLevel;
+    uint8 increasesToNextLevel;
   }
 
   event NewCharacter(uint characterId, string name, uint health, uint strength, uint speed, uint intelligence);
 
-  event LevelUp(uint characterId, uint newLevel, uint pointsToLevelUp);
+  event CharacterLevelUp(uint characterId, uint newLevel, uint pointsToLevelUp);
+
+  event SkillLevelUp(string skill, uint newLevel, uint increasesToNextLevelUp);
 
   Character[] public characters;
 
@@ -39,107 +46,104 @@ contract CharacterContract is Ownable{
     _;
   }
 
-  function getCharacterById(uint id) public view returns(Character memory) {
-    return characters[id];
+  function setCooldownTime(uint newTime) public onlyOwner {
+    skillIncreaseCooldownTime = newTime;
   }
 
-  function _createCharacter(string memory _name, uint _health, uint _strength, uint _speed, uint _intelligence) internal {
-    characters.push(Character(_name, 1, 2, uint32(_health), uint32(_strength), uint32(_speed), uint32(_intelligence) ) );
-    uint id = characters.length - 1;
-    characterToOwner[id] = msg.sender;
-    ownerCharacterCount[msg.sender]++;
-    emit NewCharacter(id, _name, _health, _strength, _speed, _intelligence);
+  function getCharacterById(uint _id) public view returns(Character memory) {
+    return characters[_id];
   }
 
-  // TODO :: make this function cost a little bit
-  function createInitialCharacter(string memory _name) public {
-    require(ownerCharacterCount[msg.sender] == 0);
-
-    // We are going to take this and use sets of two digits to decide what initial stats the character gets
-    uint randNum = uint(keccak256(abi.encodePacked(_name, msg.sender, block.timestamp)));
-    
-    uint randPercent = randNum % 100; // Get a two digit number(a percentage from 0-99)
-    randNum = randNum / 100; // Get rid of those two digits
-
-    uint health = getPointsBasedOnRandPercent(randPercent);
-
-    randPercent = randNum % 100;
-    randNum = randNum / 100;
-
-    uint strength = getPointsBasedOnRandPercent(randPercent);
-
-    randPercent = randNum % 100;
-    randNum = randNum / 100;
-
-    uint speed = getPointsBasedOnRandPercent(randPercent);
-
-    randPercent = randNum % 100;
-    randNum = randNum / 100;
-
-    uint intelligence = getPointsBasedOnRandPercent(randPercent);
-    
-    _createCharacter(_name, health, strength, speed, intelligence);
-
-  }
-
-  // Where statnum is what stat we want i.e. 1=totalHealth, 2=strength
-  function increaseStat(uint characterId, uint stat) public onlyOwnerOf(characterId) {
+  // Where stat is what stat we want i.e. 1=health, 2=strength
+  function increaseStat(uint _characterId, uint _stat) public onlyOwnerOf(_characterId) {
+    require( (_stat > 0) && (_stat < 5) );
+    Character storage character = characters[_characterId];
+    require(_isReady(character));
     // Generate random number
-    uint rand = uint(keccak256(abi.encodePacked(characterId, msg.sender, block.timestamp)));
+    uint rand = uint(keccak256(abi.encodePacked(_characterId, msg.sender, block.timestamp)));
     rand = rand % 10; // Take only the last digit
 
-    // 50-50 chance, either increase 1 point or 2 points.
-    uint amountToIncrease;
-    if(rand < 5)
+    // 80-20 chance, either increase 1 point or 2 points.
+    uint32 amountToIncrease;
+    if(rand < 7)
       amountToIncrease = 1;
     else
       amountToIncrease = 2;
     
-    if (stat == 1) {
-      _increaseTotalHealth(characterId, amountToIncrease);
-    } else if (stat == 2) {
-      _increaseStrength(characterId, amountToIncrease);
-    } else if (stat == 3) {
-      _increaseSpeed(characterId, amountToIncrease);
-    } else if (stat == 4) {
-      _increaseIntelligence(characterId, amountToIncrease);
+    Skill storage skill = character.health;
+    string memory skillName;
+    if (_stat == 1) {
+      skillName = "health";
+    } else if (_stat == 2) {
+      skill = character.strength;
+      skillName = "strength";
+    } else if (_stat == 3) {
+      skill = character.speed;
+      skillName = "speed";
+    } else if (_stat == 4) {
+      skill = character.intelligence;
+      skillName = "intelligence";
     }
     
-    uint32 maxSize = 0; // Used to get max possible size
+    if(_increaseSkill(skill, amountToIncrease)) {
+      emit SkillLevelUp(skillName, skill.skillLevel, skill.increasesToNextLevel);
+    }
+
+    character.pointsToLevelUp--;
+    
+    uint16 maxSize = 0; // Used to get max possible size
     maxSize--;
     // Since we can't go negative with unsigned, if the points to level up are the max possible then we should level up
-    if((characters[characterId].pointsToLevelUp == 0)||(characters[characterId].pointsToLevelUp==maxSize)) {
+    if((character.pointsToLevelUp == 0)||(character.pointsToLevelUp==maxSize)) {
       
-      characters[characterId].level = characters[characterId].level + uint32(1);
-      characters[characterId].pointsToLevelUp = characters[characterId].level + (characters[characterId].level/2);
+      character.level = uint32(character.level + 1);
+      character.pointsToLevelUp = uint16(character.level + (characters[_characterId].level/2));
       
-      emit LevelUp(characterId, characters[characterId].level, characters[characterId].pointsToLevelUp);
+      emit CharacterLevelUp(_characterId, characters[_characterId].level, characters[_characterId].pointsToLevelUp);
+      
     }
 
   }
 
-  function _increaseTotalHealth(uint _characterId, uint _amount) internal {
-    characters[_characterId].totalHealth = characters[_characterId].totalHealth + uint32(_amount);
-    characters[_characterId].pointsToLevelUp = characters[_characterId].pointsToLevelUp - uint32(_amount);
-  }
-  
-  function _increaseStrength(uint _characterId, uint _amount) internal {
-    characters[_characterId].strength = characters[_characterId].strength + uint32(_amount);
-    characters[_characterId].pointsToLevelUp = characters[_characterId].pointsToLevelUp - uint32(_amount);
-  }
-  
-  function _increaseSpeed(uint _characterId, uint _amount) internal {
-    characters[_characterId].speed = characters[_characterId].speed + uint32(_amount);
-    characters[_characterId].pointsToLevelUp = characters[_characterId].pointsToLevelUp - uint32(_amount);
-  }
-  
-  function _increaseIntelligence(uint _characterId, uint _amount) internal {
-    characters[_characterId].intelligence = characters[_characterId].intelligence + uint32(_amount);
-    characters[_characterId].pointsToLevelUp = characters[_characterId].pointsToLevelUp - uint32(_amount);
+  function _increaseSkill(Skill storage _skill, uint _amt) internal returns(bool)  {
+    // Level 1-10 it takes 2 increases to level up
+    // Level 11-20 it takes 3
+    // Level 21-30: it will take 5 increases to level up
+    // Level 31-50: it will take 8 increases to level up 
+    // Level 51-75: it will take 12 increases to level up
+    // Level 76-150: it will take 15 increases
+    // Level 151+: it will take 20 increases
+    uint8 maxSize = 0;
+    maxSize--;
+    
+    _skill.increasesToNextLevel = uint8(_skill.increasesToNextLevel - _amt);
+    
+    if((_skill.increasesToNextLevel == 0)||(_skill.increasesToNextLevel == maxSize)) {
+      _skill.skillLevel = _skill.skillLevel + uint16(1);
+    } else {
+      return false;
+    }
+
+    uint level = _skill.skillLevel;
+    if(level < 10)
+      _skill.increasesToNextLevel = 2;
+    else if(level < 20)
+      _skill.increasesToNextLevel = 3;
+    else if(level < 30)
+      _skill.increasesToNextLevel = 5;
+    else if(level < 50)
+      _skill.increasesToNextLevel = 8;
+    else if(level < 75)
+      _skill.increasesToNextLevel = 12;
+    else if(level < 150)
+      _skill.increasesToNextLevel = 15;
+    else
+      _skill.increasesToNextLevel = 20;
+
+    return true;
   }
 
-  function getPointsBasedOnRandPercent(uint percent) internal pure returns(uint) {
-    
+  function _getPointsBasedOnRandPercent(uint percent) internal pure returns(uint) {
     if(percent < 20) 
       return 2;
     else if(percent < 30) 
@@ -159,17 +163,25 @@ contract CharacterContract is Ownable{
     return 1;
   }
 
+  function _triggerCooldown(Character storage _character) internal {
+    _character.readyTimeForSkillIncrease = uint32(block.timestamp + skillIncreaseCooldownTime);
+  }
+
+  function _isReady(Character storage _character) internal view returns (bool) {
+      return (_character.readyTimeForSkillIncrease <= block.timestamp);
+  }
+
   function viewStats(uint characterId, uint stat) public view characterExists(characterId) onlyOwnerOf(characterId) returns (uint) {
     require( (stat > 0) && (stat < 5) );
     Character memory char = characters[characterId];
     if (stat == 1) {
-      return char.totalHealth;
+      return char.health.skillLevel;
     } else if (stat == 2) {
-      return char.strength;
+      return char.strength.skillLevel;
     } else if (stat == 3) {
-      return char.speed;
+      return char.speed.skillLevel;
     } else if (stat == 4) {
-      return char.intelligence;
+      return char.intelligence.skillLevel;
     }
     uint fakeStat = 0;
     return fakeStat;
