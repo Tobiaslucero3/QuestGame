@@ -1,5 +1,5 @@
-const CharacterContract = artifacts.require("CharacterContract");
+const CharacterFactory = artifacts.require("CharacterFactory");
 
 module.exports = function (deployer) {
-  deployer.deploy(CharacterContract);
+  deployer.deploy(CharacterFactory);
 };

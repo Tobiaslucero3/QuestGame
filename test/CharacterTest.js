@@ -1,17 +1,18 @@
-const CharacterContract = artifacts.require("CharacterContract");
+const CharacterFactory = artifacts.require("CharacterFactory");
 const utils = require("./helpers/utils");
+const time = require("./helpers/time");
 
 var expect = require('chai').expect;
 
 const characterNames = ["Char 1", "Char 2"];
 
-contract("CharacterContract", (accounts) => {
+contract("CharacterFactory", (accounts) => {
     
     let [alice, bob] = accounts;
     let contractInstance;
     
     beforeEach(async () => {
-        contractInstance = await CharacterContract.new();
+        contractInstance = await CharacterFactory.new();
     });
     
     it("should be owned by the person that deploys it", async () => {
@@ -79,6 +80,26 @@ contract("CharacterContract", (accounts) => {
             const points = pointsb.words[0];
 
             expect(points).to.equal(2);
+        })
+    })
+
+    context("for character skills", async () => {
+        xit("should be able to level up a skill after a cooldown", async () => {
+            await contractInstance.createInitialCharacter(characterNames[0], {from: alice});
+            
+            var expectedStatLevel = await contractInstance.viewStats(0, 1);
+            expectedStatLevel = expectedStatLevel.words[0];
+            expectedStatLevel = expectedStatLevel + 1;
+
+            await time.increase(time.duration.hours(7));
+            contractInstance.increaseStat(0, 1, {from: alice});
+            await time.increase(time.duration.hours(7));
+
+            var newStatLevel = await contractInstance.viewStats(0,1);
+            newStatLevel = newStatLevel.words[0];
+
+            expect(expectedStatLevel).to.equal(newStatLevel);
+
         })
     })
 
