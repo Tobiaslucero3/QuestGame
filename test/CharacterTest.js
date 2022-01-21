@@ -14,7 +14,7 @@ contract("CharacterFactory", (accounts) => {
     beforeEach(async () => {
         contractInstance = await CharacterFactory.new();
     });
-    
+    /*
     it("should be owned by the person that deploys it", async () => {
         const contractOwner = await contractInstance.owner();
         expect(contractOwner).to.equal(alice);
